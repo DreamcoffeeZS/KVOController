@@ -104,6 +104,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 
 @implementation _FBKVOInfo
 {
+//成员变量都是用了@public修饰
 @public
   __weak FBKVOController *_controller;
   NSString *_keyPath;
@@ -114,6 +115,9 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   _FBKVOInfoState _state;
 }
 
+
+//1._FBKVOInfo的主要作用就是起到了一个类似Model一样存储主要数据的作用；
+//2.并储存了一个_FBKVOInfoState作为表示当前的 KVO 状态
 - (instancetype)initWithController:(FBKVOController *)controller
                            keyPath:(NSString *)keyPath
                            options:(NSKeyValueObservingOptions)options
@@ -172,6 +176,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   return [_keyPath isEqualToString:((_FBKVOInfo *)object)->_keyPath];
 }
 
+//覆写了NSObject的方法，方便Debug
 - (NSString *)debugDescription
 {
   NSMutableString *s = [NSMutableString stringWithFormat:@"<%@:%p keyPath:%@", NSStringFromClass([self class]), self, _keyPath];
@@ -402,7 +407,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 @implementation FBKVOController
 {
   NSMapTable<id, NSMutableSet<_FBKVOInfo *> *> *_objectInfosMap;
-  pthread_mutex_t _lock;
+  pthread_mutex_t _lock;  //用于保证操作NSMutableSet的线程安全
 }
 
 #pragma mark Lifecycle -
@@ -412,11 +417,15 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   return [[self alloc] initWithObserver:observer];
 }
 
+
+//初始化：传入Observer，初始化了NSMapTable、初始化了pthread_mutex_t锁；
 - (instancetype)initWithObserver:(nullable id)observer retainObserved:(BOOL)retainObserved
 {
   self = [super init];
   if (nil != self) {
-    _observer = observer;
+    _observer = observer;  //弱引用持有观察者，避免循环引用
+    
+    //初始化NSMapTable，区分强持有还是若持有，默认controllerWithObserver是强持有；
     NSPointerFunctionsOptions keyOptions = retainObserved ? NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPointerPersonality : NSPointerFunctionsWeakMemory|NSPointerFunctionsObjectPointerPersonality;
     _objectInfosMap = [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPersonality capacity:0];
     pthread_mutex_init(&_lock, NULL);
@@ -472,9 +481,11 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   // lock
   pthread_mutex_lock(&_lock);
 
+  //获取被观察者object已经被观察的属性集合；
   NSMutableSet *infos = [_objectInfosMap objectForKey:object];
 
   // check for info existence
+  //已经存在被观察的属性信息，则不必重复添加直接return
   _FBKVOInfo *existingInfo = [infos member:info];
   if (nil != existingInfo) {
     // observation info already exists; do not observe it again
@@ -485,6 +496,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   }
 
   // lazilly create set of infos
+  //如果报错观察属性集合不存在，则c此时创建一个
   if (nil == infos) {
     infos = [NSMutableSet set];
     [_objectInfosMap setObject:infos forKey:object];
@@ -496,6 +508,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   // unlock prior to callout
   pthread_mutex_unlock(&_lock);
 
+  //使用一个单例
   [[_FBKVOSharedController sharedController] observe:object info:info];
 }
 
@@ -567,6 +580,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 
 #pragma mark API -
 
+// 注册观察者：将传入的的参数(被观察对象、被观察对象属性)，封装为_FBKVOInfo
 - (void)observe:(nullable id)object keyPath:(NSString *)keyPath options:(NSKeyValueObservingOptions)options block:(FBKVONotificationBlock)block
 {
   NSAssert(0 != keyPath.length && NULL != block, @"missing required parameters observe:%@ keyPath:%@ block:%p", object, keyPath, block);

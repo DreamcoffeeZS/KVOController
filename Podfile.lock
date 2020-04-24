@@ -6,10 +6,15 @@ PODS:
 DEPENDENCIES:
   - OCMockito (~> 1.0)
 
+SPEC REPOS:
+  https://github.com/CocoaPods/Specs.git:
+    - OCHamcrest
+    - OCMockito
+
 SPEC CHECKSUMS:
   OCHamcrest: cd63d27f48a266d4412c0b295b01b8f0940efa81
   OCMockito: 4981140c9a9ec06c31af40f636e3c0f25f27e6b2
 
 PODFILE CHECKSUM: 1026faf939ab9383f180a86a589158d5d2602d4b
 
-COCOAPODS: 1.2.0
+COCOAPODS: 1.8.4
