@@ -418,16 +418,22 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 }
 
 
-//初始化：传入Observer，初始化了NSMapTable、初始化了pthread_mutex_t锁；
+//初始化：传入Observer、初始化了NSMapTable、初始化了pthread_mutex_t锁；
 - (instancetype)initWithObserver:(nullable id)observer retainObserved:(BOOL)retainObserved
 {
   self = [super init];
   if (nil != self) {
-    _observer = observer;  //弱引用持有观察者，避免循环引用
+    _observer = observer;  //_observer被弱引用持有，避免循环引用
     
-    //初始化NSMapTable，区分强持有还是若持有，默认controllerWithObserver是强持有；
-    NSPointerFunctionsOptions keyOptions = retainObserved ? NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPointerPersonality : NSPointerFunctionsWeakMemory|NSPointerFunctionsObjectPointerPersonality;
-    _objectInfosMap = [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPersonality capacity:0];
+    //定义NSMapTable key的内存管理策略，在默认情况，传入的参数 retainObserved = YES
+    //NSMapTable  key为id类型，value为NSMutableSet<_FBKVOInfo *> 类型
+    NSPointerFunctionsOptions keyOptions = retainObserved ? NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPointerPersonality :
+                                                            NSPointerFunctionsWeakMemory|NSPointerFunctionsObjectPointerPersonality;
+    _objectInfosMap = [[NSMapTable alloc] initWithKeyOptions:keyOptions
+                                                valueOptions:NSPointerFunctionsStrongMemory|NSPointerFunctionsObjectPersonality
+                                                    capacity:0];
+    
+     //初始化互斥锁，避免多线程间的数据竞争
     pthread_mutex_init(&_lock, NULL);
   }
   return self;
@@ -478,14 +484,16 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 
 - (void)_observe:(id)object info:(_FBKVOInfo *)info
 {
-  // lock
+  // lock互斥锁加锁
   pthread_mutex_lock(&_lock);
 
-  //获取被观察者object已经被观察的属性集合；
+  //_objectInfosMap就是FBKVOController初始化创建的NSMapTable
+  //以被观察者object为key，获取其被观察的属性结合
   NSMutableSet *infos = [_objectInfosMap objectForKey:object];
 
   // check for info existence
-  //已经存在被观察的属性信息，则不必重复添加直接return
+  //如果已经存在被观察的属性信息，则不必重复添加直接return
+  //这里必须重写 _FBKVOInfo hash 以及 isEqual 方法，这样才能使用 NSSet 的 member 方法；
   _FBKVOInfo *existingInfo = [infos member:info];
   if (nil != existingInfo) {
     // observation info already exists; do not observe it again
@@ -496,7 +504,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   }
 
   // lazilly create set of infos
-  //如果报错观察属性集合不存在，则c此时创建一个
+  //如果没有这个object(被观察者)的相关信息，则创建NSMutableSet，并添加到NSMapTable中;
   if (nil == infos) {
     infos = [NSMutableSet set];
     [_objectInfosMap setObject:infos forKey:object];
@@ -508,7 +516,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   // unlock prior to callout
   pthread_mutex_unlock(&_lock);
 
-  //使用一个单例
+  //sharedController是干嘛的？  将所有观察信息统一交由一个单例来完成
   [[_FBKVOSharedController sharedController] observe:object info:info];
 }
 
@@ -583,7 +591,10 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 // 注册观察者：将传入的的参数(被观察对象、被观察对象属性)，封装为_FBKVOInfo
 - (void)observe:(nullable id)object keyPath:(NSString *)keyPath options:(NSKeyValueObservingOptions)options block:(FBKVONotificationBlock)block
 {
+  //当keyPath字符串长度为0、block为空时，会产生断言，程序会 crash
   NSAssert(0 != keyPath.length && NULL != block, @"missing required parameters observe:%@ keyPath:%@ block:%p", object, keyPath, block);
+ 
+   //如果 “被观察对象” 为 nil，同样会直接返回
   if (nil == object || 0 == keyPath.length || NULL == block) {
     return;
   }
@@ -591,7 +602,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
   // create info
   _FBKVOInfo *info = [[_FBKVOInfo alloc] initWithController:self keyPath:keyPath options:options block:block];
 
-  // observe object with info
+  //使用生成的_FBKVOInfo对象信息，注册观察
   [self _observe:object info:info];
 }
 
