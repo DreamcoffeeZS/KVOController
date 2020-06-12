@@ -292,14 +292,19 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
     return;
   }
 
-  // register info
+  // register info   向 NSHashTable 添加 info
+  //注意：在 _FBKVOController 类中的 NSMutableSet 已经强引用了 info
+  //这里是为了弱引用 info，才使用 NSHashTable，当 info dealloc 时，同时会从容器中删除
   pthread_mutex_lock(&_mutex);
   [_infos addObject:info];
   pthread_mutex_unlock(&_mutex);
 
   // add observer
+  //_FBKVOSharedController 是实际的观察者！ 随后会进行转发 ，
+  //context 是 void * 无类型指针，是 info 的指针！
   [object addObserver:self forKeyPath:info->_keyPath options:info->_options context:(void *)info];
 
+  //如果 state 是原始状态，则改为正在观察的状态，表明是在正在观察的状态
   if (info->_state == _FBKVOInfoStateInitial) {
     info->_state = _FBKVOInfoStateObserving;
   } else if (info->_state == _FBKVOInfoStateNotObserving) {
@@ -362,6 +367,7 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
 
   {
     // lookup context in registered infos, taking out a strong reference only if it exists
+    // 利用 context 查找 info，其中用到了 void  * 转换为 id 型变量 (__bridge id)
     pthread_mutex_lock(&_mutex);
     info = [_infos member:(__bridge id)context];
     pthread_mutex_unlock(&_mutex);
@@ -383,6 +389,8 @@ NSString *const FBKVONotificationKeyPathKey = @"FBKVONotificationKeyPathKey";
           // add the keyPath to the change dictionary for clarity when mulitple keyPaths are being observed
           if (keyPath) {
             NSMutableDictionary<NSString *, id> *mChange = [NSMutableDictionary dictionaryWithObject:keyPath forKey:FBKVONotificationKeyPathKey];
+            //字典合并，并重新拷贝一份，
+            //包含信息有：1、改变了哪个值 mChange 2、 原先的 change 字典
             [mChange addEntriesFromDictionary:change];
             changeWithKeyPath = [mChange copy];
           }
